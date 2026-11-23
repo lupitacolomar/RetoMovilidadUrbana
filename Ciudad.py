@@ -1,14 +1,38 @@
+"""Gotham City - zona Upper East Side + Coventry (Modelo 3D Avanzado).
+
+Conserva al 100% la topología, planos, retícula y coordenadas originales:
+    nodos   = 20 intersecciones (x, y, z)
+    aristas = 31 tramos viales (autopista Schwartz Bypass, avenidas y calles)
+              con sus atributos (tipo, límite de velocidad, carriles) para
+              la simulación de agentes multiagente.
+    semáforos = 62 semáforos sincronizados por eje (EW / NS) con ciclo de 2 fases.
+
+Mejoras visuales implementadas (sin alterar los planos):
+    1. Superficies viales sólidas con asfalto detallado y señalización horizontal
+       (doble línea amarilla central en avenidas, líneas discontinuas blancas,
+       pasos peatonales de cebra y líneas de detención en cada aproximación).
+    2. Autopista Schwartz Bypass con camellón central sólido elevado y césped.
+    3. Banquetas perimetrales elevadas en todas las manzanas con cordones de granito,
+       pavimento y detalles de mobiliario urbano (hidrantes de bomberos).
+    4. Edificios sólidos con iluminación volumétrica y ventanas procedimentales:
+       - Wayne Tower: rascacielos Art Déco de 4 niveles, corona dorada y baliza roja.
+       - Arkham Asylum: complejo gótico con 4 torres de vigilancia cónicas, óculo y reloj.
+       - GCPD: cuartel policial con helipuerto ("H") y proyector de la Bat-Señal en las nubes.
+       - Torres góticas, edificios Art Déco y almacenes industriales con chimeneas.
+    5. Robinson Park con césped, senderos peatonales, bancas y árboles 3D volumétricos.
+    6. Reservoir con espejo de agua profundo, muro de contención y embarcadero de madera.
+    7. Semáforos 3D con postes, viseras parasol y lentes emisivas sincronizadas.
+    8. Tres modos de visualización conmutables: Híbrido, Sólido y Alambre.
+"""
 
 import math
 import random
 import time
-
 import numpy as np
 from OpenGL import GL as gl
 
-
 # ---------------------------------------------------------------------------
-# Parámetros de la zona
+# Parámetros originales de la zona (Planos y Retícula)
 # ---------------------------------------------------------------------------
 COLUMNAS = 5          # avenidas (norte-sur)  -> 5 x 4 = 20 intersecciones
 FILAS = 4             # calles (este-oeste)
@@ -35,19 +59,17 @@ ALTO_POSTE = 8.0      # altura del poste del semáforo
 ALTO_CABEZA = 4.8     # caja con las 3 luces
 RADIO_LUZ = 0.5       # radio de cada luz
 ALTO_FAROLA = 10.0
-N_ARBOLES = 16        # árboles secos en Robinson Park
+N_ARBOLES = 16        # árboles en Robinson Park
 
-# Atributos por tipo de vía
-# --- Tamaño del carro y de los carriles -----------------------------------
-# Dimensiones de carroceria.obj (unidades de modelo, con swapyz): largo x ancho
+# Dimensiones de carriles y vehículos
 CARRO_LARGO_MODELO = 9.85
 CARRO_ANCHO_MODELO = 3.92
-ESCALA_CARRO = 0.45                      # <- Scale que se le pasa a Carro(dim, vel, Scale)
+ESCALA_CARRO = 0.45
 CARRO_LARGO = CARRO_LARGO_MODELO * ESCALA_CARRO     # ~4.43
 CARRO_ANCHO = CARRO_ANCHO_MODELO * ESCALA_CARRO     # ~1.76
-FACTOR_CARRIL = 1.7                      # ancho de carril / ancho del carro
-ANCHO_CARRIL = 3.0                       # ~1.7 x 1.76 = 3.0
-CAMELLON = 1.2                           # separador central de la autopista
+FACTOR_CARRIL = 1.7
+ANCHO_CARRIL = 3.0                                  # ~1.7 x 1.76 = 3.0
+CAMELLON = 1.2                                      # separador central de la autopista
 assert ANCHO_CARRIL >= 1.5 * CARRO_ANCHO, "el carro no cabe cómodo en el carril"
 
 TIPOS = {
@@ -57,50 +79,48 @@ TIPOS = {
 }
 for _t in TIPOS.values():
     _t["carril"] = ANCHO_CARRIL
-    _t["ancho"] = _t["carriles"] * ANCHO_CARRIL + _t["camellon"]   # 6 / 12 / 13.2
+    _t["ancho"] = _t["carriles"] * ANCHO_CARRIL + _t["camellon"]
 
+# Colores originales para modo alambre
 COLORES = {
-    # vías
     "calle":      (105, 118, 140),
     "avenida":    (150, 178, 220),
     "autopista":  (235, 175, 70),
     "nodo":       (205, 205, 220),
     "zona":       (70, 150, 110),
-    # edificios
     "caja":       (125, 135, 160),
     "escalonado": (160, 172, 205),
     "gotica":     (178, 150, 215),
     "almacen":    (105, 115, 128),
     "wayne":      (245, 215, 110),
     "arkham":     (225, 110, 110),
-    # infraestructura
     "poste":      (190, 190, 205),
     "farola":     (255, 205, 110),
     "arbol":      (150, 120, 90),
-    "senal":      (255, 238, 150),     # Bat-Señal
+    "senal":      (255, 238, 150),
     "gcpd":       (110, 170, 235),
 }
 
-# Colores de los semáforos
 COLOR_SEMAFORO = {
     "verde":    (60, 230, 110),
     "amarillo": (250, 220, 60),
     "rojo":     (240, 60, 60),
 }
-# Luz apagada (se sigue viendo para que se note el semáforo de 3 luces)
 COLOR_APAGADO = {
     "verde":    (25, 85, 50),
     "amarillo": (95, 85, 25),
     "rojo":     (100, 32, 32),
 }
-ORDEN_LUCES = ("rojo", "amarillo", "verde")      # de arriba hacia abajo
+ORDEN_LUCES = ("rojo", "amarillo", "verde")
 
-# (tipo, probabilidad) de los edificios "normales"
 MEZCLA = [("caja", 0.20), ("escalonado", 0.30), ("gotica", 0.38), ("almacen", 0.12)]
 
 
+# ---------------------------------------------------------------------------
+# Clases de la simulación
+# ---------------------------------------------------------------------------
 class Arista:
-    """Tramo de calle entre dos intersecciones."""
+    """Tramo de calle entre dos intersecciones con sus propiedades de tráfico."""
 
     def __init__(self, a, b, tipo, nombre=None):
         self.a = a
@@ -112,29 +132,16 @@ class Arista:
         self.carriles = TIPOS[tipo]["carriles"]
         self.ancho_carril = TIPOS[tipo]["carril"]
         self.camellon = TIPOS[tipo]["camellon"]
-        # Centro de cada carril (distancia al eje de la vía) de adentro hacia afuera.
-        # Tránsito por la derecha: yendo a->b se usa el lado de normal negativa
-        # (n = (-dz, dx)), yendo b->a el de normal positiva.
         centros = [self.camellon / 2 + self.ancho_carril * (k + 0.5)
                    for k in range(self.carriles // 2)]
         self.carriles_ab = [-c for c in centros]
         self.carriles_ba = [c for c in centros]
-        self.ruta = []          # puntos 3D del eje de la calle
+        self.ruta = []          # puntos 3D del eje de la calle ya girados
         self.longitud = 0.0
 
 
 class Semaforo:
-    """Semáforo de 3 luces (rojo arriba, amarillo en medio, verde abajo) de un
-    acceso a una intersección.
-
-    eje:    "EW" (este-oeste) o "NS" (norte-sur): los semáforos del mismo eje
-            comparten fase.
-    nodo:   índice de la intersección que controla.
-    x, z:   posición del poste (retícula, sin girar).
-    ux, uz: dirección por la que llegan los carros hacia el semáforo
-            (sentido nodo -> afuera); las luces miran hacia esa dirección.
-    estado: "verde" | "amarillo" | "rojo" (solo una luz encendida).
-    """
+    """Semáforo de 3 luces en un acceso de una intersección."""
 
     def __init__(self, nodo, eje, col, fila, x, z, ux, uz):
         self.nodo = nodo
@@ -155,35 +162,146 @@ class Edificio:
         self.huella = []            # 4 esquinas 3D ya giradas
 
 
+# ---------------------------------------------------------------------------
+# Generador de Geometría 3D Sólida y Alambre
+# ---------------------------------------------------------------------------
+class _GeometriaBuilder:
+    def __init__(self, cx, cz, rot_deg):
+        self.cx = cx
+        self.cz = cz
+        ang = math.radians(rot_deg)
+        self.cos_a = math.cos(ang)
+        self.sin_a = math.sin(ang)
+
+        self.solidos_v = []
+        self.lineas_v = []
+        self.transp_v = []
+
+    def girar_pto(self, x, y, z):
+        dx = x - self.cx
+        dz = z - self.cz
+        rx = self.cos_a * dx + self.sin_a * dz
+        rz = -self.sin_a * dx + self.cos_a * dz
+        return (rx, y, rz)
+
+    def girar_vec(self, vx, vy, vz):
+        rx = self.cos_a * vx + self.sin_a * vz
+        rz = -self.sin_a * vx + self.cos_a * vz
+        return (rx, vy, rz)
+
+    def add_tri(self, p0, p1, p2, color, normal=None, transp=False, rotar=True):
+        gp0 = self.girar_pto(*p0) if rotar else p0
+        gp1 = self.girar_pto(*p1) if rotar else p1
+        gp2 = self.girar_pto(*p2) if rotar else p2
+
+        if normal is None:
+            ax, ay, az = gp1[0] - gp0[0], gp1[1] - gp0[1], gp1[2] - gp0[2]
+            bx, by, bz = gp2[0] - gp0[0], gp2[1] - gp0[1], gp2[2] - gp0[2]
+            nx = ay * bz - az * by
+            ny = az * bx - ax * bz
+            nz = ax * by - ay * bx
+            mag = math.hypot(nx, ny, nz) or 1.0
+            normal = (nx / mag, ny / mag, nz / mag)
+        elif rotar:
+            normal = self.girar_vec(*normal)
+
+        c = [comp / 255.0 if comp > 1.0 else float(comp) for comp in color]
+        if len(c) == 3:
+            c.append(1.0)
+        r, g, b, a = c
+
+        target = self.transp_v if transp else self.solidos_v
+        for p in (gp0, gp1, gp2):
+            target.extend([p[0], p[1], p[2], normal[0], normal[1], normal[2], r, g, b, a])
+
+    def add_quad(self, p0, p1, p2, p3, color, normal=None, transp=False, rotar=True):
+        self.add_tri(p0, p1, p2, color, normal, transp, rotar)
+        self.add_tri(p0, p2, p3, color, normal, transp, rotar)
+
+    def add_linea(self, p0, p1, color, rotar=True):
+        gp0 = self.girar_pto(*p0) if rotar else p0
+        gp1 = self.girar_pto(*p1) if rotar else p1
+        c = [comp / 255.0 if comp > 1.0 else float(comp) for comp in color]
+        r, g, b = c[:3]
+        self.lineas_v.extend([gp0[0], gp0[1], gp0[2], r, g, b])
+        self.lineas_v.extend([gp1[0], gp1[1], gp1[2], r, g, b])
+
+    def add_caja(self, x0, y0, z0, x1, y1, z1, col_pared, col_techo=None, rotar=True, con_borde=True):
+        if col_techo is None:
+            col_techo = col_pared
+        self.add_quad((x0, y1, z0), (x0, y1, z1), (x1, y1, z1), (x1, y1, z0), col_techo, (0, 1, 0), rotar=rotar)
+        self.add_quad((x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1), col_pared, (0, 0, 1), rotar=rotar)
+        self.add_quad((x1, y0, z0), (x0, y0, z0), (x0, y1, z0), (x1, y1, z0), col_pared, (0, 0, -1), rotar=rotar)
+        self.add_quad((x1, y0, z1), (x1, y0, z0), (x1, y1, z0), (x1, y1, z1), col_pared, (1, 0, 0), rotar=rotar)
+        self.add_quad((x0, y0, z0), (x0, y0, z1), (x0, y1, z1), (x0, y1, z0), col_pared, (-1, 0, 0), rotar=rotar)
+
+        if con_borde:
+            bc = (col_pared[0] * 0.45, col_pared[1] * 0.45, col_pared[2] * 0.45)
+            for ex, ez in ((x0, z0), (x1, z0), (x1, z1), (x0, z1)):
+                self.add_linea((ex, y0, ez), (ex, y1, ez), bc, rotar=rotar)
+            top_esq = [(x0, y1, z0), (x1, y1, z0), (x1, y1, z1), (x0, y1, z1)]
+            for k in range(4):
+                self.add_linea(top_esq[k], top_esq[(k + 1) % 4], bc, rotar=rotar)
+
+    def add_piramide(self, x0, z0, x1, z1, y_base, alto, color, rotar=True):
+        cx, cz = (x0 + x1) / 2, (z0 + z1) / 2
+        punta = (cx, y_base + alto, cz)
+        b = [(x0, y_base, z0), (x1, y_base, z0), (x1, y_base, z1), (x0, y_base, z1)]
+        for i in range(4):
+            self.add_tri(b[i], b[(i + 1) % 4], punta, color, rotar=rotar)
+        bc = (color[0] * 0.55, color[1] * 0.55, color[2] * 0.55)
+        for i in range(4):
+            self.add_linea(b[i], punta, bc, rotar=rotar)
+            self.add_linea(b[i], b[(i + 1) % 4], bc, rotar=rotar)
+
+    def add_gable(self, x0, z0, x1, z1, y_base, alto, color, rotar=True):
+        zc, xc = (z0 + z1) / 2, (x0 + x1) / 2
+        if (x1 - x0) >= (z1 - z0):
+            c0, c1 = (x0, y_base + alto, zc), (x1, y_base + alto, zc)
+            self.add_quad((x0, y_base, z0), (x1, y_base, z0), c1, c0, color, rotar=rotar)
+            self.add_quad(c0, c1, (x1, y_base, z1), (x0, y_base, z1), color, rotar=rotar)
+            self.add_tri((x0, y_base, z1), (x0, y_base, z0), c0, color, rotar=rotar)
+            self.add_tri((x1, y_base, z0), (x1, y_base, z1), c1, color, rotar=rotar)
+        else:
+            c0, c1 = (xc, y_base + alto, z0), (xc, y_base + alto, z1)
+            self.add_quad((x0, y_base, z0), c0, c1, (x0, y_base, z1), color, rotar=rotar)
+            self.add_quad(c0, (x1, y_base, z0), (x1, y_base, z1), c1, color, rotar=rotar)
+            self.add_tri((x0, y_base, z0), (x1, y_base, z0), c0, color, rotar=rotar)
+            self.add_tri((x1, y_base, z1), (x0, y_base, z1), c1, color, rotar=rotar)
+
+
+# ---------------------------------------------------------------------------
+# Clase Ciudad Principal
+# ---------------------------------------------------------------------------
 class Ciudad:
     def __init__(self):
-        self.idx = {}             # (col, fila) -> índice de nodo
-        self.nodos = []           # (x, y, z) ya girados
+        self.idx = {}
+        self.nodos = []
         self.aristas = []
         self.edificios = []
-        self.zonas = {}           # nombre -> polígono 3D (agua / parque)
-
-        self.semaforos = []       # objetos Semaforo
+        self.zonas = {}
+        self.semaforos = []
         self.n_farolas = 0
         self.n_arboles = 0
-        self.tiempo = 0.0         # reloj de los semáforos (s)
-        self.auto_reloj = True    # True: render avanza el reloj solo
+        self.tiempo = 0.0
+        self.auto_reloj = True
         self._t_ultimo = None
-        self.luces = None         # (S, 3, 8, 3): 3 luces x 8 puntos por semáforo
-
-        # Geometría de dibujo para OpenGL: 2 vértices por segmento
-        self.vertices = None      # (N, 3) float32
-        self.colores_v = None     # (N, 3) float32, componentes en [0, 1]
-
         self.rng = random.Random(SEMILLA)
+
+        # Modos de visualización: "hibrido" (sólido + aristas), "solido", "alambre"
+        self.modo = "hibrido"
+        self._display_list = None
+        self.luces_semaforos_dinamicas = []
+
+        # Arreglos de alambre original para compatibilidad total
+        self.vertices = None
+        self.colores_v = None
+
         self._construir()
 
-    # ------------------------------------------------------------------
-    # Construcción
-    # ------------------------------------------------------------------
     @staticmethod
     def _posicion_base(c, r):
-        return (c * SEP_AV, (FILAS - 1 - r) * SEP_CALLE)   # fila 0 = norte
+        return (c * SEP_AV, (FILAS - 1 - r) * SEP_CALLE)
 
     @staticmethod
     def _rect_celda(c, r):
@@ -196,87 +314,326 @@ class Ciudad:
         pos2d = []
         aristas = []
 
-        # --- Nodos (todas las intersecciones de la retícula)
+        # Nodos
         for r in range(FILAS):
             for c in range(COLUMNAS):
                 self.idx[(c, r)] = len(pos2d)
                 pos2d.append(self._posicion_base(c, r))
 
-        # --- Aristas de la retícula
+        # Aristas
         for r in range(FILAS):
             for c in range(COLUMNAS):
                 a = self.idx[(c, r)]
-                if c + 1 < COLUMNAS:        # calle (este-oeste)
-                    if r == FILA_PRINCIPAL:  # avenida principal, recta
-                        aristas.append(Arista(a, self.idx[(c + 1, r)],
-                                              "autopista", NOMBRE_PRINCIPAL))
+                if c + 1 < COLUMNAS:
+                    if r == FILA_PRINCIPAL:
+                        aristas.append(Arista(a, self.idx[(c + 1, r)], "autopista", NOMBRE_PRINCIPAL))
                     else:
                         aristas.append(Arista(a, self.idx[(c + 1, r)], "calle"))
-                if r + 1 < FILAS:           # avenida (norte-sur)
+                if r + 1 < FILAS:
                     aristas.append(Arista(a, self.idx[(c, r + 1)], "avenida"))
 
         rutas2d = [[pos2d[ar.a], pos2d[ar.b]] for ar in aristas]
 
-        # --- Radio de cada intersección (según la vía más ancha que llega)
         radio = [0.0] * len(pos2d)
         for ar in aristas:
             radio[ar.a] = max(radio[ar.a], ar.ancho / 2 + 0.7)
             radio[ar.b] = max(radio[ar.b], ar.ancho / 2 + 0.7)
 
-        segs = []   # (p1, p2, clave_de_color), puntos 3D en retícula
-
-        # --- Vías: dos bordes paralelos por calle + cuadro en cada intersección
-        for ar, ruta in zip(aristas, rutas2d):
-            Q = self._recortar(ruta, radio[ar.a], radio[ar.b])
-            normales = self._normales(Q)
-            for lado in (+1, -1):
-                borde = [
-                    (q[0] + lado * n[0] * ar.ancho / 2, 0.0,
-                     q[1] + lado * n[1] * ar.ancho / 2)
-                    for q, n in zip(Q, normales)
-                ]
-                for p1, p2 in zip(borde[:-1], borde[1:]):
-                    segs.append((p1, p2, ar.tipo))
-
-        for i, (x, z) in enumerate(pos2d):
-            h = radio[i]
-            esq = [(x - h, 0.0, z - h), (x + h, 0.0, z - h),
-                   (x + h, 0.0, z + h), (x - h, 0.0, z + h)]
-            for k in range(4):
-                segs.append((esq[k], esq[(k + 1) % 4], "nodo"))
-
-        # --- Manzanas verdes (agua / parque)
-        zonas2d = {}
-        for (c, r), nombre in CELDAS_VERDES.items():
-            zonas2d[nombre] = self._elipse_celda(c, r)
-        for poligono in zonas2d.values():
-            n = len(poligono)
-            for k in range(n):
-                a = (poligono[k][0], 0.0, poligono[k][1])
-                b = (poligono[(k + 1) % n][0], 0.0, poligono[(k + 1) % n][1])
-                segs.append((a, b, "zona"))
-
-        # --- Árboles secos en Robinson Park
-        self._arboles(zonas2d, segs)
-
-        # --- Farolas y semáforos
-        self._farolas(aristas, rutas2d, segs)
-        cabezas = self._semaforos(aristas, rutas2d, radio, segs)
-
-        # --- Edificios
-        ejes = [(pos2d[ar.a], pos2d[ar.b], ar.ancho / 2) for ar in aristas]
-        edificios = self._generar_edificios(ejes, segs)
-
-        # --- Giro de toda la zona: centrar y rotar alrededor de Y
         xs = [p[0] for p in pos2d]
         zs = [p[1] for p in pos2d]
         self._cx, self._cz = (min(xs) + max(xs)) / 2, (min(zs) + max(zs)) / 2
 
+        bld = _GeometriaBuilder(self._cx, self._cz, ROTACION)
+        self.bld = bld
+
+        # 1. Base del terreno
+        min_x, max_x = min(xs) - 70, max(xs) + 70
+        min_z, max_z = min(zs) - 70, max(zs) + 70
+        bld.add_quad((min_x, -0.05, min_z), (min_x, -0.05, max_z),
+                     (max_x, -0.05, max_z), (max_x, -0.05, min_z),
+                     (16, 18, 24), (0, 1, 0), rotar=True)
+
+        # 2. Banquetas perimetrales elevadas
+        col_bordillo = (125, 130, 140)
+        col_banqueta = (80, 84, 94)
+        col_junta = (65, 68, 76)
+
+        for r in range(FILAS - 1):
+            for c in range(COLUMNAS - 1):
+                if (c, r) in CELDAS_VERDES:
+                    continue
+                x0, z0, x1, z1 = self._rect_celda(c, r)
+                bx0 = x0 + MARGEN_X - 1.2
+                bx1 = x1 - MARGEN_X + 1.2
+                bz0 = z0 + MARGEN_Z - 1.2
+                bz1 = z1 - MARGEN_Z + 1.2
+                bld.add_caja(bx0, 0.0, bz0, bx1, 0.22, bz1, col_bordillo, col_banqueta, rotar=True, con_borde=True)
+                for gx in np.linspace(bx0 + 4, bx1 - 4, int((bx1 - bx0)/8)):
+                    bld.add_linea((gx, 0.225, bz0), (gx, 0.225, bz1), col_junta, rotar=True)
+                for gz in np.linspace(bz0 + 4, bz1 - 4, int((bz1 - bz0)/8)):
+                    bld.add_linea((bx0, 0.225, gz), (bx1, 0.225, gz), col_junta, rotar=True)
+
+                # Hidrantes de bomberos
+                hx, hz = bx1 - 1.8, bz0 + 1.8
+                bld.add_caja(hx - 0.25, 0.22, hz - 0.25, hx + 0.25, 0.95, hz + 0.25,
+                             (210, 35, 35), (230, 45, 45), rotar=True)
+                bld.add_caja(hx - 0.4, 0.65, hz - 0.12, hx + 0.4, 0.80, hz + 0.12,
+                             (240, 190, 40), rotar=True)
+
+        # 3. Calles y Asfalto
+        col_asfalto = (32, 34, 40)
+        col_asfalto_hwy = (24, 26, 32)
+        col_linea_blanca = (240, 240, 245)
+        col_linea_amarilla = (250, 195, 30)
+
+        for ar, ruta in zip(aristas, rutas2d):
+            Q = self._recortar(ruta, radio[ar.a], radio[ar.b])
+            (x_a, z_a), (x_b, z_b) = Q[0], Q[1]
+            dx, dz = x_b - x_a, z_b - z_a
+            L = math.hypot(dx, dz) or 1.0
+            ux, uz = dx / L, dz / L
+            nx, nz = -uz, ux
+            hw = ar.ancho / 2.0
+
+            c_asf = col_asfalto_hwy if ar.tipo == "autopista" else col_asfalto
+            p0 = (x_a - nx * hw, 0.02, z_a - nz * hw)
+            p1 = (x_b - nx * hw, 0.02, z_b - nz * hw)
+            p2 = (x_b + nx * hw, 0.02, z_b + nz * hw)
+            p3 = (x_a + nx * hw, 0.02, z_a + nz * hw)
+            bld.add_quad(p0, p1, p2, p3, c_asf, (0, 1, 0), rotar=True)
+            bld.add_linea((p0[0], 0.03, p0[2]), (p1[0], 0.03, p1[2]), (55, 60, 70), rotar=True)
+            bld.add_linea((p3[0], 0.03, p3[2]), (p2[0], 0.03, p2[2]), (55, 60, 70), rotar=True)
+
+            if ar.tipo == "calle":
+                n_tramos = int(L / 3.8)
+                for k in range(n_tramos):
+                    t0 = (k + 0.25) / n_tramos
+                    t1 = (k + 0.75) / n_tramos
+                    la = (x_a + dx * t0, 0.035, z_a + dz * t0)
+                    lb = (x_a + dx * t1, 0.035, z_a + dz * t1)
+                    bld.add_quad((la[0] - nx * 0.12, 0.035, la[2] - nz * 0.12),
+                                 (lb[0] - nx * 0.12, 0.035, lb[2] - nz * 0.12),
+                                 (lb[0] + nx * 0.12, 0.035, lb[2] + nz * 0.12),
+                                 (la[0] + nx * 0.12, 0.035, la[2] + nz * 0.12),
+                                 col_linea_blanca, (0, 1, 0), rotar=True)
+
+            elif ar.tipo == "avenida":
+                for off in (-0.22, 0.22):
+                    la = (x_a + nx * off, 0.035, z_a + nz * off)
+                    lb = (x_b + nx * off, 0.035, z_b + nz * off)
+                    bld.add_quad((la[0] - nx * 0.09, 0.035, la[2] - nz * 0.09),
+                                 (lb[0] - nx * 0.09, 0.035, lb[2] - nz * 0.09),
+                                 (lb[0] + nx * 0.09, 0.035, lb[2] + nz * 0.09),
+                                 (la[0] + nx * 0.09, 0.035, la[2] + nz * 0.09),
+                                 col_linea_amarilla, (0, 1, 0), rotar=True)
+                for sign in (-1, 1):
+                    off = sign * ANCHO_CARRIL
+                    n_tramos = int(L / 3.8)
+                    for k in range(n_tramos):
+                        t0 = (k + 0.25) / n_tramos
+                        t1 = (k + 0.75) / n_tramos
+                        la = (x_a + dx * t0 + nx * off, 0.035, z_a + dz * t0 + nz * off)
+                        lb = (x_a + dx * t1 + nx * off, 0.035, z_a + dz * t1 + nz * off)
+                        bld.add_quad((la[0] - nx * 0.1, 0.035, la[2] - nz * 0.1),
+                                     (lb[0] - nx * 0.1, 0.035, lb[2] - nz * 0.1),
+                                     (lb[0] + nx * 0.1, 0.035, lb[2] + nz * 0.1),
+                                     (la[0] + nx * 0.1, 0.035, la[2] + nz * 0.1),
+                                     col_linea_blanca, (0, 1, 0), rotar=True)
+
+            elif ar.tipo == "autopista":
+                hw_c = CAMELLON / 2.0
+                c0 = (x_a - nx * hw_c, 0.0, z_a - nz * hw_c)
+                c1 = (x_b - nx * hw_c, 0.0, z_b - nz * hw_c)
+                c2 = (x_b + nx * hw_c, 0.0, z_b + nz * hw_c)
+                c3 = (x_a + nx * hw_c, 0.0, z_a + nz * hw_c)
+                bld.add_quad((c0[0], 0.35, c0[2]), (c1[0], 0.35, c1[2]),
+                             (c2[0], 0.35, c2[2]), (c3[0], 0.35, c3[2]),
+                             (48, 72, 44), (0, 1, 0), rotar=True)
+                bld.add_quad((c0[0], 0.0, c0[2]), (c1[0], 0.0, c1[2]),
+                             (c1[0], 0.35, c1[2]), (c0[0], 0.35, c0[2]),
+                             (160, 165, 175), (-nx, 0, -nz), rotar=True)
+                bld.add_quad((c3[0], 0.35, c3[2]), (c2[0], 0.35, c2[2]),
+                             (c2[0], 0.0, c2[2]), (c3[0], 0.0, c3[2]),
+                             (160, 165, 175), (nx, 0, nz), rotar=True)
+                for sign in (-1, 1):
+                    off = sign * (hw_c + 0.3)
+                    la = (x_a + nx * off, 0.035, z_a + nz * off)
+                    lb = (x_b + nx * off, 0.035, z_b + nz * off)
+                    bld.add_linea(la, lb, col_linea_blanca, rotar=True)
+                    off_ext = sign * (hw_c + ANCHO_CARRIL)
+                    n_tramos = int(L / 3.8)
+                    for k in range(n_tramos):
+                        t0 = (k + 0.25) / n_tramos
+                        t1 = (k + 0.75) / n_tramos
+                        sla = (x_a + dx * t0 + nx * off_ext, 0.035, z_a + dz * t0 + nz * off_ext)
+                        slb = (x_a + dx * t1 + nx * off_ext, 0.035, z_a + dz * t1 + nz * off_ext)
+                        bld.add_linea(sla, slb, col_linea_blanca, rotar=True)
+
+            for p_end, dir_s in ((Q[0], 1.0), (Q[1], -1.0)):
+                p_stop = (p_end[0] + ux * dir_s * 1.5, 0.038, p_end[1] + uz * dir_s * 1.5)
+                bld.add_quad((p_stop[0] - nx * (hw - 0.5), 0.038, p_stop[2] - nz * (hw - 0.5)),
+                             (p_stop[0] + nx * (hw - 0.5), 0.038, p_stop[2] + nz * (hw - 0.5)),
+                             (p_stop[0] + nx * (hw - 0.5) + ux * dir_s * 0.4, 0.038, p_stop[2] + nz * (hw - 0.5) + uz * dir_s * 0.4),
+                             (p_stop[0] - nx * (hw - 0.5) + ux * dir_s * 0.4, 0.038, p_stop[2] - nz * (hw - 0.5) + uz * dir_s * 0.4),
+                             col_linea_blanca, (0, 1, 0), rotar=True)
+                n_franjas = int((hw * 2 - 1.0) / 0.8)
+                p_cebra = (p_end[0] + ux * dir_s * 0.4, 0.038, p_end[1] + uz * dir_s * 0.4)
+                for f in range(n_franjas):
+                    f_off = -hw + 0.8 + f * 0.8
+                    ca = (p_cebra[0] + nx * (f_off - 0.25), 0.038, p_cebra[2] + nz * (f_off - 0.25))
+                    cb = (p_cebra[0] + nx * (f_off + 0.25), 0.038, p_cebra[2] + nz * (f_off + 0.25))
+                    bld.add_quad(ca, cb,
+                                 (cb[0] + ux * dir_s * 0.9, 0.038, cb[2] + uz * dir_s * 0.9),
+                                 (ca[0] + ux * dir_s * 0.9, 0.038, ca[2] + uz * dir_s * 0.9),
+                                 col_linea_blanca, (0, 1, 0), rotar=True)
+
+        # 4. Cruces de intersecciones
+        for i, (ix, iz) in enumerate(pos2d):
+            h = radio[i]
+            esq = [(ix - h, 0.022, iz - h), (ix + h, 0.022, iz - h),
+                   (ix + h, 0.022, iz + h), (ix - h, 0.022, iz + h)]
+            bld.add_quad(esq[0], esq[1], esq[2], esq[3], (26, 28, 34), (0, 1, 0), rotar=True)
+            for k in range(4):
+                bld.add_linea(esq[k], esq[(k + 1) % 4], (50, 55, 65), rotar=True)
+
+        # 5. Zonas verdes
+        zonas2d = {}
+        for (c, r), nombre in CELDAS_VERDES.items():
+            zonas2d[nombre] = self._elipse_celda(c, r)
+
+        res_pts = zonas2d.get("Reservoir")
+        if res_pts:
+            cx_res = sum(p[0] for p in res_pts) / len(res_pts)
+            cz_res = sum(p[1] for p in res_pts) / len(res_pts)
+            n_p = len(res_pts)
+            for k in range(n_p):
+                p0, p1 = res_pts[k], res_pts[(k + 1) % n_p]
+                bld.add_quad((p0[0], 0.0, p0[1]), (p1[0], 0.0, p1[1]),
+                             (p1[0], 0.45, p1[1]), (p0[0], 0.45, p0[1]),
+                             (85, 90, 100), rotar=True)
+                bld.add_linea((p0[0], 0.45, p0[1]), (p1[0], 0.45, p1[1]), (130, 135, 145), rotar=True)
+            for k in range(n_p):
+                p0, p1 = res_pts[k], res_pts[(k + 1) % n_p]
+                bld.add_tri((cx_res, 0.20, cz_res), (p0[0], 0.20, p0[1]), (p1[0], 0.20, p1[1]),
+                            (22, 75, 95), (0, 1, 0), rotar=True)
+            px0, pz0 = cx_res + 9.5, cz_res
+            bld.add_caja(px0 - 3.2, 0.20, pz0 - 1.2, px0 + 3.2, 0.30, pz0 + 1.2, (100, 70, 45), (120, 85, 55), rotar=True)
+            for m_off in (-2.6, 0.0, 2.6):
+                bld.add_caja(px0 + m_off - 0.2, 0.20, pz0 - 1.4, px0 + m_off + 0.2, 0.60, pz0 - 1.0, (65, 45, 30), rotar=True)
+                bld.add_caja(px0 + m_off - 0.2, 0.20, pz0 + 1.0, px0 + m_off + 0.2, 0.60, pz0 + 1.4, (65, 45, 30), rotar=True)
+
+        park_pts = zonas2d.get("Robinson Park")
+        if park_pts:
+            cx_pk = sum(p[0] for p in park_pts) / len(park_pts)
+            cz_pk = sum(p[1] for p in park_pts) / len(park_pts)
+            n_p = len(park_pts)
+            for k in range(n_p):
+                p0, p1 = park_pts[k], park_pts[(k + 1) % n_p]
+                bld.add_quad((p0[0], 0.0, p0[1]), (p1[0], 0.0, p1[1]),
+                             (p1[0], 0.25, p1[1]), (p0[0], 0.25, p0[1]),
+                             (80, 85, 80), rotar=True)
+                bld.add_tri((cx_pk, 0.25, cz_pk), (p0[0], 0.25, p0[1]), (p1[0], 0.25, p1[1]),
+                            (30, 56, 36), (0, 1, 0), rotar=True)
+
+            rx_p = max(p[0] for p in park_pts) - cx_pk
+            rz_p = max(p[1] for p in park_pts) - cz_pk
+            for k in range(n_p):
+                t0 = 2 * math.pi * k / n_p
+                t1 = 2 * math.pi * (k + 1) / n_p
+                a0 = (cx_pk + rx_p * 0.62 * math.cos(t0), 0.26, cz_pk + rz_p * 0.62 * math.sin(t0))
+                a1 = (cx_pk + rx_p * 0.62 * math.cos(t1), 0.26, cz_pk + rz_p * 0.62 * math.sin(t1))
+                bld.add_linea(a0, a1, (115, 120, 110), rotar=True)
+
+            rng_arb = random.Random(SEMILLA + 7)
+            for _ in range(N_ARBOLES):
+                while True:
+                    u, v = rng_arb.uniform(-1, 1), rng_arb.uniform(-1, 1)
+                    if 0.06 < u * u + v * v <= 0.74:
+                        break
+                tx, tz = cx_pk + u * rx_p, cz_pk + v * rz_p
+                h_tronco = rng_arb.uniform(6.5, 10.5)
+                bld.add_caja(tx - 0.4, 0.25, tz - 0.4, tx + 0.4, 0.25 + h_tronco, tz + 0.4,
+                             (65, 45, 30), (55, 38, 26), rotar=True)
+                n_copas = rng_arb.choice([2, 3])
+                for cp in range(n_copas):
+                    y_cp = 0.25 + h_tronco * (0.42 + cp * 0.26)
+                    r_cp = rng_arb.uniform(2.6, 4.2) * (1.0 - cp * 0.22)
+                    alto_cp = rng_arb.uniform(3.8, 5.2)
+                    col_fol = rng_arb.choice([(24, 48, 28), (30, 56, 34), (18, 40, 24)])
+                    bld.add_piramide(tx - r_cp, tz - r_cp, tx + r_cp, tz + r_cp, y_cp, alto_cp, col_fol, rotar=True)
+                self.n_arboles += 1
+
+                if rng_arb.random() < 0.4:
+                    bx, bz = tx + 2.0, tz + 1.0
+                    bld.add_caja(bx - 1.2, 0.25, bz - 0.4, bx + 1.2, 0.65, bz + 0.4,
+                                 (90, 60, 38), (110, 75, 45), rotar=True)
+
+        # 6. Farolas y Semáforos
+        for ar, ruta in zip(aristas, rutas2d):
+            (ax, az), (bx, bz) = ruta[0], ruta[-1]
+            L = math.hypot(bx - ax, bz - az)
+            dx, dz = (bx - ax) / L, (bz - az) / L
+            nx, nz = -dz, dx
+            for t_frac, lado in ((1 / 3, +1), (2 / 3, -1)):
+                px, pz = ax + (bx - ax) * t_frac, az + (bz - az) * t_frac
+                fx = px + lado * nx * (ar.ancho / 2 + 0.9)
+                fz = pz + lado * nz * (ar.ancho / 2 + 0.9)
+                bld.add_caja(fx - 0.2, 0.0, fz - 0.2, fx + 0.2, ALTO_FAROLA, fz + 0.2,
+                             (50, 55, 62), (65, 70, 78), rotar=True)
+                fxa = fx - lado * nx * 2.2
+                fza = fz - lado * nz * 2.2
+                bld.add_linea((fx, ALTO_FAROLA, fz), (fxa, ALTO_FAROLA, fza), (75, 80, 90), rotar=True)
+                bld.add_caja(fxa - 0.35, ALTO_FAROLA - 0.8, fza - 0.35, fxa + 0.35, ALTO_FAROLA, fza + 0.35,
+                             (255, 230, 140), (255, 245, 180), rotar=True)
+                self.n_farolas += 1
+
+        for ar, ruta in zip(aristas, rutas2d):
+            (ax_, az_), (bx_, bz_) = ruta[0], ruta[-1]
+            L = math.hypot(bx_ - ax_, bz_ - az_)
+            dx, dz = (bx_ - ax_) / L, (bz_ - az_) / L
+            eje = "EW" if abs(dx) > abs(dz) else "NS"
+
+            for nodo, (px, pz), (ux, uz) in ((ar.a, (ax_, az_), (dx, dz)),
+                                             (ar.b, (bx_, bz_), (-dx, -dz))):
+                rx_, rz_ = -uz, ux
+                sx = px + ux * (radio[nodo] + 1.2) + rx_ * (ar.ancho / 2 + 1.0)
+                sz = pz + uz * (radio[nodo] + 1.2) + rz_ * (ar.ancho / 2 + 1.0)
+                bld.add_caja(sx - 0.25, 0.0, sz - 0.25, sx + 0.25, ALTO_POSTE + ALTO_CABEZA, sz + 0.25,
+                             (42, 45, 50), (55, 60, 65), rotar=True)
+                arm_x = sx - rx_ * 1.8
+                arm_z = sz - rz_ * 1.8
+                bld.add_linea((sx, ALTO_POSTE + ALTO_CABEZA - 0.5, sz),
+                              (arm_x, ALTO_POSTE + ALTO_CABEZA - 0.5, arm_z), (60, 65, 72), rotar=True)
+
+                y0_c, y1_c = ALTO_POSTE, ALTO_POSTE + ALTO_CABEZA
+                cx0, cz0 = sx + ux * 0.3, sz + uz * 0.3
+                bld.add_caja(cx0 - 0.55, y0_c, cz0 - 0.55, cx0 + 0.55, y1_c, cz0 + 0.55,
+                             (26, 28, 34), (18, 20, 24), rotar=True)
+
+                col = next(c for (c, f), i in self.idx.items() if i == nodo)
+                fila = next(f for (c, f), i in self.idx.items() if i == nodo)
+                sem = Semaforo(nodo, eje, col, fila, sx, sz, ux, uz)
+                self.semaforos.append(sem)
+
+                luces_sem = []
+                for f_y, nombre_luz in zip((0.8, 0.5, 0.2), ORDEN_LUCES):
+                    ly = y0_c + ALTO_CABEZA * f_y
+                    lx_face = cx0 + ux * 0.62
+                    lz_face = cz0 + uz * 0.62
+                    gp = bld.girar_pto(lx_face, ly, lz_face)
+                    gnorm = bld.girar_vec(ux, 0.0, uz)
+                    luces_sem.append((gp, gnorm, nombre_luz))
+                self.luces_semaforos_dinamicas.append((sem, luces_sem))
+
+        # 7. Edificios
+        ejes = [(pos2d[ar.a], pos2d[ar.b], ar.ancho / 2) for ar in aristas]
+        edificios = self._generar_edificios_solidos(ejes, bld)
+        self.edificios = edificios
+
         def a3d(lista2d):
-            return self._girar([(x, 0.0, z) for x, z in lista2d]).tolist()
+            return [bld.girar_pto(x, 0.0, z) for x, z in lista2d]
 
         self.nodos = a3d(pos2d)
-
         for ar, ruta in zip(aristas, rutas2d):
             ar.ruta = a3d(ruta)
             ar.longitud = sum(math.dist(p, q) for p, q in zip(ar.ruta[:-1], ar.ruta[1:]))
@@ -287,220 +644,296 @@ class Ciudad:
 
         for e in edificios:
             e.huella = a3d(e.huella2d)
-        self.edificios = edificios
 
-        # Buffers de OpenGL: vértices y un color por vértice
-        flat = []
-        colores = []
-        for p1, p2, clave in segs:
-            flat.extend([p1, p2])
-            colores.append(COLORES[clave])
-        self.vertices = np.ascontiguousarray(self._girar(flat), dtype=np.float32)
-        self.colores_v = np.ascontiguousarray(
-            np.repeat(np.array(colores, dtype=np.float32) / 255.0, 2, axis=0))
+        self.arr_solidos = np.array(bld.solidos_v, dtype=np.float32)
+        self.arr_lineas = np.array(bld.lineas_v, dtype=np.float32)
+        self.arr_transp = np.array(bld.transp_v, dtype=np.float32) if bld.transp_v else None
 
-        # Luces de semáforo (se dibujan aparte: cambian de color)
-        self.luces = self._girar(cabezas).reshape(len(self.semaforos), 3, 8, 3)
+        # Buffers de alambre para modo compatibilidad
+        self.vertices = self.arr_lineas[0::2]
+        self.colores_v = np.repeat(np.array([[120, 140, 180]], dtype=np.float32) / 255.0, len(self.vertices), axis=0)
+
+        self._display_list = None
         self.actualizar(0.0)
 
-    def _girar(self, puntos):
-        """Centra la zona y la gira ROTACION grados alrededor de Y.
-        Recibe una lista de (x, y, z) y devuelve un arreglo (N, 3)."""
-        p = np.array(puntos, dtype=np.float64).reshape(-1, 3)
-        x, z = p[:, 0] - self._cx, p[:, 2] - self._cz
-        ang = math.radians(ROTACION)
-        c, s = math.cos(ang), math.sin(ang)
-        return np.stack([c * x + s * z, p[:, 1], -s * x + c * z], axis=1)
-
-    # ------------------------------------------------------------------
-    # Infraestructura urbana
-    # ------------------------------------------------------------------
-    def _arboles(self, zonas2d, segs):
-        """Árboles secos (tronco + ramas) dentro de Robinson Park."""
-        poligono = zonas2d.get("Robinson Park")
-        if not poligono:
-            return
-        rng = random.Random(SEMILLA + 7)      # no altera la semilla de los edificios
-        cx = sum(p[0] for p in poligono) / len(poligono)
-        cz = sum(p[1] for p in poligono) / len(poligono)
-        rx = max(p[0] for p in poligono) - cx
-        rz = max(p[1] for p in poligono) - cz
-
-        for _ in range(N_ARBOLES):
-            while True:
-                u, v = rng.uniform(-1, 1), rng.uniform(-1, 1)
-                if u * u + v * v <= 0.78:
-                    break
-            x, z = cx + u * rx, cz + v * rz
-            h = rng.uniform(7, 12)
-            segs.append(((x, 0.0, z), (x, h, z), "arbol"))
-            ang0 = rng.uniform(0, 2 * math.pi)
-            for k, fy in enumerate((0.55, 0.75, 1.0)):
-                a = ang0 + k * 2.1
-                largo = rng.uniform(2.5, 4.5)
-                y0 = h * fy
-                p0 = (x, y0, z)
-                p1 = (x + largo * math.cos(a), y0 + largo * 0.7, z + largo * math.sin(a))
-                segs.append((p0, p1, "arbol"))
-                b = a + rng.choice((-0.6, 0.6))      # ramita
-                segs.append((p1, (p1[0] + 1.6 * math.cos(b), p1[1] + 1.4,
-                                  p1[2] + 1.6 * math.sin(b)), "arbol"))
-            self.n_arboles += 1
-
-    def _farolas(self, aristas, rutas2d, segs):
-        """Dos farolas por tramo, una a cada lado de la vía (alternadas)."""
-        for ar, ruta in zip(aristas, rutas2d):
-            (ax, az), (bx, bz) = ruta[0], ruta[-1]
-            L = math.hypot(bx - ax, bz - az)
-            dx, dz = (bx - ax) / L, (bz - az) / L
-            nx, nz = -dz, dx
-            for t, lado in ((1 / 3, +1), (2 / 3, -1)):
-                px, pz = ax + (bx - ax) * t, az + (bz - az) * t
-                x = px + lado * nx * (ar.ancho / 2 + 0.9)
-                z = pz + lado * nz * (ar.ancho / 2 + 0.9)
-                xa, za = x - lado * nx * 2.4, z - lado * nz * 2.4     # brazo hacia la calle
-                segs.append(((x, 0.0, z), (x, ALTO_FAROLA, z), "poste"))
-                segs.append(((x, ALTO_FAROLA, z), (xa, ALTO_FAROLA, za), "poste"))
-                for p1, p2 in self._caja((xa - 0.5, za - 0.5, xa + 0.5, za + 0.5),
-                                         ALTO_FAROLA - 1.0, ALTO_FAROLA):
-                    segs.append((p1, p2, "farola"))
-                self.n_farolas += 1
-
-    def _semaforos(self, aristas, rutas2d, radio, segs):
-        """Un semáforo de 3 luces por acceso de cada intersección (a la derecha
-        de quien llega). Poste y caja van con la geometría fija; las 3 luces
-        (octágonos de 8 puntos) se devuelven aparte porque cambian de color."""
-        luces = []
-        y_luz = [ALTO_POSTE + ALTO_CABEZA * f for f in (0.8, 0.5, 0.2)]   # rojo, amarillo, verde
-        for ar, ruta in zip(aristas, rutas2d):
-            (ax_, az_), (bx_, bz_) = ruta[0], ruta[-1]
-            L = math.hypot(bx_ - ax_, bz_ - az_)
-            dx, dz = (bx_ - ax_) / L, (bz_ - az_) / L
-            eje = "EW" if abs(dx) > abs(dz) else "NS"
-
-            for nodo, (px, pz), (ux, uz) in ((ar.a, (ax_, az_), (dx, dz)),
-                                             (ar.b, (bx_, bz_), (-dx, -dz))):
-                # (ux, uz): del nodo hacia afuera por este acceso. Quien llega
-                # avanza en (-ux, -uz); su derecha es (-uz, ux).
-                rx_, rz_ = -uz, ux
-                x = px + ux * (radio[nodo] + 1.2) + rx_ * (ar.ancho / 2 + 1.0)
-                z = pz + uz * (radio[nodo] + 1.2) + rz_ * (ar.ancho / 2 + 1.0)
-                segs.append(((x, 0.0, z), (x, ALTO_POSTE, z), "poste"))
-
-                # caja: 0.6 a cada lado en la dirección (ux, uz), 0.8 a lo ancho
-                lx, lz = -uz, ux
-                y0, y1 = ALTO_POSTE, ALTO_POSTE + ALTO_CABEZA
-                esq = [(x + ux * 0.6 * sa + lx * 0.8 * sb, z + uz * 0.6 * sa + lz * 0.8 * sb)
-                       for sa, sb in ((-1, -1), (-1, 1), (1, 1), (1, -1))]
-                for k in range(4):
-                    e1, e2 = esq[k], esq[(k + 1) % 4]
-                    segs.append(((e1[0], y0, e1[1]), (e2[0], y0, e2[1]), "poste"))
-                    segs.append(((e1[0], y1, e1[1]), (e2[0], y1, e2[1]), "poste"))
-                    segs.append(((e1[0], y0, e1[1]), (e1[0], y1, e1[1]), "poste"))
-
-                # 3 luces en la cara que mira a los carros que llegan
-                fx, fz = x + ux * 0.64, z + uz * 0.64
-                for yc in y_luz:
-                    for j in range(8):
-                        t = 2 * math.pi * j / 8
-                        luces.append((fx + lx * RADIO_LUZ * math.cos(t), yc + RADIO_LUZ * math.sin(t),
-                                      fz + lz * RADIO_LUZ * math.cos(t)))
-
-                col = next(c for (c, f), i in self.idx.items() if i == nodo)
-                fila = next(f for (c, f), i in self.idx.items() if i == nodo)
-                self.semaforos.append(Semaforo(nodo, eje, col, fila, x, z, ux, uz))
-        return luces
-
-    # ------------------------------------------------------------------
-    # Control de semáforos (la simulación puede leer/cambiar esto)
-    # ------------------------------------------------------------------
-    @staticmethod
-    def estado_en(eje, t):
-        """Estado de un eje ("EW" o "NS") en el instante t del ciclo."""
-        ciclo = 2 * (T_VERDE + T_AMARILLO)
-        t = t % ciclo
-        if eje == "NS":
-            t = (t + T_VERDE + T_AMARILLO) % ciclo
-        if t < T_VERDE:
-            return "verde"
-        if t < T_VERDE + T_AMARILLO:
-            return "amarillo"
-        return "rojo"
-
-    def actualizar(self, dt):
-        """Avanza el reloj de los semáforos dt segundos y actualiza colores."""
-        self.tiempo += dt
-        for sem in self.semaforos:
-            sem.estado = self.estado_en(sem.eje, self.tiempo)
-
-    def estado_semaforo(self, col, fila, eje):
-        """Estado del semáforo de la intersección (col, fila) para un eje."""
-        return self.estado_en(eje, self.tiempo)
-
-    # ------------------------------------------------------------------
-    # Edificios
-    # ------------------------------------------------------------------
-    def _generar_edificios(self, ejes, segs):
+    def _generar_edificios_solidos(self, ejes, bld):
         rng = self.rng
         edificios = []
         centro_x = (COLUMNAS - 1) * SEP_AV / 2
         centro_z = (FILAS - 1) * SEP_CALLE / 2
 
+        colores_fachada = [
+            (110, 115, 125),
+            (138, 128, 118),
+            (90, 100, 115),
+            (105, 60, 50),
+            (55, 70, 85),
+        ]
+        colores_techo = [
+            (42, 45, 52),
+            (52, 56, 64),
+            (38, 40, 46),
+        ]
+
         for r in range(FILAS - 1):
             for c in range(COLUMNAS - 1):
                 if (c, r) in CELDAS_VERDES:
                     continue
-
                 x0, z0, x1, z1 = self._rect_celda(c, r)
                 cx, cz = (x0 + x1) / 2, (z0 + z1) / 2
 
                 if (c, r) == CELDA_ARKHAM:
-                    edificios.append(self._arkham(cx, cz, segs))
+                    edificios.append(self._arkham_solido(cx, cz, bld))
                     continue
                 if (c, r) == CELDA_WAYNE:
-                    edificios.append(self._wayne(cx, cz, segs))
+                    edificios.append(self._wayne_solido(cx, cz, bld))
                     continue
                 if (c, r) == CELDA_GCPD:
-                    edificios.append(self._gcpd(cx, cz, segs))
+                    edificios.append(self._gcpd_solido(cx, cz, bld))
                     continue
 
                 ix0, ix1 = x0 + MARGEN_X, x1 - MARGEN_X
                 iz0, iz1 = z0 + MARGEN_Z, z1 - MARGEN_Z
                 lw, ld = (ix1 - ix0) / 2, (iz1 - iz0) / 2
 
-                # 2 x 2 lotes por manzana
                 lotes = []
                 for i in range(2):
                     for j in range(2):
-                        if rng.random() < 0.08:       # algún lote vacío
+                        if rng.random() < 0.08:
                             continue
                         lotes.append((
                             ix0 + lw * (i + 0.5) + rng.uniform(-1.2, 1.2),
                             iz0 + ld * (j + 0.5) + rng.uniform(-1.0, 1.0),
                             (lw - 3.5) * rng.uniform(0.75, 1.0),
-                            (ld - 3.5) * rng.uniform(0.75, 1.0)))
+                            (ld - 3.5) * rng.uniform(0.75, 1.0)
+                        ))
 
                 for lcx, lcz, w, d in lotes:
-                    if True:
+                    huella = self._huella_libre(lcx, lcz, w, d, ejes)
+                    if huella is None:
+                        continue
+                    dist = math.hypot((lcx - centro_x) / (centro_x or 1),
+                                      (lcz - centro_z) / (centro_z or 1))
+                    altura = rng.uniform(24, 50) + 45 * max(0.0, 1.0 - dist)
+                    tipo = rng.choices([t for t, _ in MEZCLA], [p for _, p in MEZCLA])[0]
 
-                        huella = self._huella_libre(lcx, lcz, w, d, ejes)
-                        if huella is None:
-                            continue
+                    col_fac = rng.choice(colores_fachada)
+                    col_tch = rng.choice(colores_techo)
 
-                        # Más altos hacia el centro de la zona
-                        dist = math.hypot((lcx - centro_x) / (centro_x or 1),
-                                          (lcz - centro_z) / (centro_z or 1))
-                        altura = rng.uniform(24, 50) + 45 * max(0.0, 1.0 - dist)
+                    hx0, hz0, hx1, hz1 = huella
+                    esquinas = [(hx0, hz0), (hx1, hz0), (hx1, hz1), (hx0, hz1)]
 
-                        tipo = rng.choices([t for t, _ in MEZCLA],
-                                           [p for _, p in MEZCLA])[0]
-                        edificios.append(self._levantar(tipo, huella, altura, segs))
+                    pw, ph = min(2.5, (hx1 - hx0) * 0.35), 2.8
+                    bld.add_caja(lcx - pw/2, 0.22, hz1 - 0.1, lcx + pw/2, 0.22 + ph, hz1 + 0.15,
+                                 (50, 40, 30), (220, 180, 80), rotar=True)
+
+                    if tipo == "caja":
+                        bld.add_caja(hx0, 0, hz0, hx1, altura, hz1, col_fac, col_tch, rotar=True)
+                        bld.add_caja(hx0, altura, hz0, hx1, altura + 1.2, hz1, col_fac, (30, 32, 36), rotar=True, con_borde=False)
+                        cw, cd = (hx1 - hx0) * 0.35, (hz1 - hz0) * 0.35
+                        bld.add_caja(lcx - cw/2, altura, lcz - cd/2, lcx + cw/2, altura + 3.5, lcz + cd/2,
+                                     (70, 75, 82), (48, 50, 56), rotar=True)
+                        self._agregar_ventanas(bld, hx0, hz0, hx1, hz1, altura, rng)
+
+                    elif tipo == "escalonado":
+                        y_cur = 0.0
+                        niveles = rng.choice([2, 3])
+                        fracs = [0.55, 0.45] if niveles == 2 else [0.45, 0.32, 0.23]
+                        w_cur, d_cur = (hx1 - hx0), (hz1 - hz0)
+                        for fr in fracs:
+                            h_nv = altura * fr
+                            x_0, x_1 = lcx - w_cur/2, lcx + w_cur/2
+                            z_0, z_1 = lcz - d_cur/2, lcz + d_cur/2
+                            bld.add_caja(x_0, y_cur, z_0, x_1, y_cur + h_nv, z_1, col_fac, col_tch, rotar=True)
+                            self._agregar_ventanas(bld, x_0, z_0, x_1, z_1, h_nv, rng, y_offset=y_cur)
+                            y_cur += h_nv
+                            w_cur *= 0.72
+                            d_cur *= 0.72
+                        bld.add_piramide(lcx - w_cur/2, lcz - d_cur/2, lcx + w_cur/2, lcz + d_cur/2,
+                                         y_cur, 8.0, (185, 155, 85), rotar=True)
+                        bld.add_linea((lcx, y_cur + 8.0, lcz), (lcx, y_cur + 16.0, lcz), (220, 200, 120), rotar=True)
+
+                    elif tipo == "gotica":
+                        h_cuerpo = altura * 0.7
+                        h_techo = max(10.0, min(32.0, altura * 0.35))
+                        bld.add_caja(hx0, 0, hz0, hx1, h_cuerpo, hz1, col_fac, col_tch, rotar=True)
+                        self._agregar_ventanas(bld, hx0, hz0, hx1, hz1, h_cuerpo, rng)
+                        bld.add_piramide(hx0, hz0, hx1, hz1, h_cuerpo, h_techo, (45, 50, 60), rotar=True)
+                        t_sz = min(3.0, (hx1 - hx0) * 0.22, (hz1 - hz0) * 0.22)
+                        for tx, tz in ((hx0, hz0), (hx1 - t_sz, hz0), (hx0, hz1 - t_sz), (hx1 - t_sz, hz1 - t_sz)):
+                            bld.add_caja(tx, h_cuerpo, tz, tx + t_sz, h_cuerpo + 3.0, tz + t_sz,
+                                         col_fac, (45, 50, 60), rotar=True)
+                            bld.add_piramide(tx, tz, tx + t_sz, tz + t_sz, h_cuerpo + 3.0, 7.0, (40, 45, 55), rotar=True)
+
+                    else:
+                        h_alm = rng.uniform(10, 16)
+                        bld.add_caja(hx0, 0, hz0, hx1, h_alm, hz1, (105, 52, 42), (58, 60, 66), rotar=True)
+                        bld.add_gable(hx0, hz0, hx1, hz1, h_alm, 5.0, (68, 72, 80), rotar=True)
+                        chx, chz = hx1 - 2.5, hz0 + 2.0
+                        bld.add_caja(chx - 0.9, 0, chz - 0.9, chx + 0.9, h_alm + 12.0, chz + 0.9,
+                                     (120, 42, 32), (38, 38, 38), rotar=True)
+                        for y_aro in (h_alm + 3, h_alm + 7, h_alm + 11):
+                            bld.add_linea((chx - 1.0, y_aro, chz - 1.0), (chx + 1.0, y_aro, chz - 1.0), (30, 30, 30), rotar=True)
+                            bld.add_linea((chx + 1.0, y_aro, chz - 1.0), (chx + 1.0, y_aro, chz + 1.0), (30, 30, 30), rotar=True)
+
+                    edificios.append(Edificio(tipo, altura, esquinas))
+
         return edificios
+
+    def _agregar_ventanas(self, bld, x0, z0, x1, z1, altura, rng, y_offset=0.0):
+        w, d = x1 - x0, z1 - z0
+        piso_h = 3.2
+        pisos = max(1, int(altura / piso_h) - 1)
+        col_calida = (255, 215, 120)
+        col_azul = (165, 215, 245)
+        col_oscura = (42, 48, 58)
+
+        for p in range(pisos):
+            y_win = y_offset + 2.2 + p * piso_h
+            if y_win + 1.6 > y_offset + altura:
+                break
+            n_cols_x = max(1, int(w / 3.0))
+            for k in range(n_cols_x):
+                wx = x0 + 1.5 + k * (w - 3.0) / max(1, n_cols_x - 1) if n_cols_x > 1 else (x0 + x1) / 2
+                cw = rng.choices([col_calida, col_azul, col_oscura], [0.35, 0.20, 0.45])[0]
+                bld.add_quad((wx - 0.55, y_win, z1 + 0.05), (wx + 0.55, y_win, z1 + 0.05),
+                             (wx + 0.55, y_win + 1.3, z1 + 0.05), (wx - 0.55, y_win + 1.3, z1 + 0.05),
+                             cw, (0, 0, 1), rotar=True)
+                bld.add_quad((wx + 0.55, y_win, z0 - 0.05), (wx - 0.55, y_win, z0 - 0.05),
+                             (wx - 0.55, y_win + 1.3, z0 - 0.05), (wx + 0.55, y_win + 1.3, z0 - 0.05),
+                             cw, (0, 0, -1), rotar=True)
+
+            n_cols_z = max(1, int(d / 3.0))
+            for k in range(n_cols_z):
+                wz = z0 + 1.5 + k * (d - 3.0) / max(1, n_cols_z - 1) if n_cols_z > 1 else (z0 + z1) / 2
+                cw = rng.choices([col_calida, col_azul, col_oscura], [0.35, 0.20, 0.45])[0]
+                bld.add_quad((x1 + 0.05, y_win, wz - 0.55), (x1 + 0.05, y_win, wz + 0.55),
+                             (x1 + 0.05, y_win + 1.3, wz + 0.55), (x1 + 0.05, y_win + 1.3, wz - 0.55),
+                             cw, (1, 0, 0), rotar=True)
+                bld.add_quad((x0 - 0.05, y_win, wz + 0.55), (x0 - 0.05, y_win, wz - 0.55),
+                             (x0 - 0.05, y_win + 1.3, wz - 0.55), (x0 - 0.05, y_win + 1.3, wz + 0.55),
+                             cw, (-1, 0, 0), rotar=True)
+
+    def _wayne_solido(self, cx, cz, bld):
+        f = (cx - 11, cz - 9, cx + 11, cz + 9)
+        esq = [(f[0], f[1]), (f[2], f[1]), (f[2], f[3]), (f[0], f[3])]
+        niveles = [
+            (11, 9, 35.0, (135, 130, 120)),
+            (8.5, 7.0, 30.0, (150, 140, 125)),
+            (6.0, 5.0, 22.0, (165, 150, 130)),
+            (4.0, 3.5, 13.0, (185, 165, 125)),
+        ]
+        y_cur = 0.0
+        for hw, hd, h_tier, col in niveles:
+            bld.add_caja(cx - hw, y_cur, cz - hd, cx + hw, y_cur + h_tier, cz + hd, col, (48, 50, 58), rotar=True)
+            bld.add_caja(cx - hw - 0.3, y_cur + h_tier - 1.2, cz - hd - 0.3,
+                         cx + hw + 0.3, y_cur + h_tier, cz + hd + 0.3,
+                         (220, 185, 75), (240, 200, 85), rotar=True)
+            self._agregar_ventanas(bld, cx - hw, cz - hd, cx + hw, cz + hd, h_tier, self.rng, y_offset=y_cur)
+            y_cur += h_tier
+
+        bld.add_piramide(cx - 3.0, cz - 2.5, cx + 3.0, cz + 2.5, y_cur, 14.0, (230, 195, 80), rotar=True)
+        bld.add_caja(cx - 0.3, y_cur + 14.0, cz - 0.3, cx + 0.3, y_cur + 30.0, cz + 0.3,
+                     (255, 230, 120), (255, 255, 255), rotar=True)
+        bld.add_caja(cx - 0.6, y_cur + 30.0, cz - 0.6, cx + 0.6, y_cur + 31.2, cz + 0.6,
+                     (255, 40, 40), (255, 60, 60), rotar=True)
+
+        return Edificio("wayne", 100, esq, "Wayne Tower")
+
+    def _arkham_solido(self, cx, cz, bld):
+        f = (cx - 19, cz - 10, cx + 19, cz + 10)
+        esq = [(f[0], f[1]), (f[2], f[1]), (f[2], f[3]), (f[0], f[3])]
+        col_piedra = (82, 85, 95)
+        col_tejado = (45, 48, 58)
+
+        bld.add_caja(f[0], 0, f[1], f[2], 14.0, f[3], col_piedra, col_tejado, rotar=True)
+        bld.add_gable(f[0], f[1], f[2], f[3], 14.0, 7.0, col_tejado, rotar=True)
+        self._agregar_ventanas(bld, f[0], f[1], f[2], f[3], 14.0, self.rng)
+
+        for tx, tz in ((f[0], f[1]), (f[2] - 6.5, f[1]), (f[0], f[3] - 6.5), (f[2] - 6.5, f[3] - 6.5)):
+            bld.add_caja(tx, 0, tz, tx + 6.5, 34.0, tz + 6.5, (72, 75, 85), col_tejado, rotar=True)
+            bld.add_piramide(tx, tz, tx + 6.5, tz + 6.5, 34.0, 16.0, (38, 42, 50), rotar=True)
+            bld.add_linea(((tx + tx + 6.5)/2, 50.0, (tz + tz + 6.5)/2),
+                          ((tx + tx + 6.5)/2, 54.0, (tz + tz + 6.5)/2), (180, 185, 195), rotar=True)
+
+        tc = (cx - 5.0, cz - 5.0, cx + 5.0, cz + 5.0)
+        bld.add_caja(tc[0], 0, tc[1], tc[2], 44.0, tc[3], (68, 70, 80), col_tejado, rotar=True)
+        bld.add_piramide(tc[0], tc[1], tc[2], tc[3], 44.0, 22.0, (32, 35, 44), rotar=True)
+        bld.add_caja(cx - 1.5, 37.0, tc[1] - 0.2, cx + 1.5, 40.0, tc[1] + 0.1, (235, 220, 140), rotar=True)
+
+        return Edificio("arkham", 66, esq, "Arkham Asylum")
+
+    def _gcpd_solido(self, cx, cz, bld):
+        f = (cx - 14, cz - 9, cx + 14, cz + 9)
+        esq = [(f[0], f[1]), (f[2], f[1]), (f[2], f[3]), (f[0], f[3])]
+        col_gcpd = (72, 85, 110)
+        bld.add_caja(f[0], 0, f[1], f[2], 24.0, f[3], col_gcpd, (48, 52, 62), rotar=True)
+        self._agregar_ventanas(bld, f[0], f[1], f[2], f[3], 24.0, self.rng)
+
+        # Helipuerto
+        bld.add_caja(cx - 6, 24.0, cz - 6, cx + 6, 24.2, cz + 6, (38, 42, 50), (45, 50, 58), rotar=True)
+        bld.add_caja(cx - 2.5, 24.25, cz - 2.0, cx - 1.7, 24.25, cz + 2.0, (240, 210, 40), rotar=True)
+        bld.add_caja(cx + 1.7, 24.25, cz - 2.0, cx + 2.5, 24.25, cz + 2.0, (240, 210, 40), rotar=True)
+        bld.add_caja(cx - 2.0, 24.25, cz - 0.4, cx + 2.0, 24.25, cz + 0.4, (240, 210, 40), rotar=True)
+
+        # Proyector de la Bat-Señal
+        bld.add_caja(cx - 2.0, 24.0, cz + 4.0, cx + 2.0, 28.5, cz + 8.0, (55, 60, 70), (80, 85, 95), rotar=True)
+        base = (cx, 28.5, cz + 6.0)
+        yc, zc, R = 112.0, cz + 24.0, 16.0
+        n = 16
+        aro = [(cx + R * math.cos(2 * math.pi * k / n), yc + R * 0.8 * math.sin(2 * math.pi * k / n), zc)
+               for k in range(n)]
+
+        for k in range(n):
+            k_next = (k + 1) % n
+            bld.add_tri(base, aro[k], aro[k_next], (255, 245, 175, 0.16), transp=True, rotar=True)
+            bld.add_linea(aro[k], aro[k_next], (255, 235, 140), rotar=True)
+            if k % 4 == 0:
+                bld.add_linea(base, aro[k], (255, 240, 160), rotar=True)
+
+        # Nube iluminada
+        for k in range(n):
+            k_next = (k + 1) % n
+            bld.add_tri((cx, yc, zc), aro[k], aro[k_next], (255, 245, 185, 0.40), transp=True, rotar=True)
+
+        # Silueta de Batman en el centro del haz
+        bat = [(-1.0, 0.25), (-0.8, 0.6), (-0.55, 0.45), (-0.4, 0.15), (-0.2, 0.2),
+               (-0.12, 0.5), (0.0, 0.35), (0.12, 0.5), (0.2, 0.2), (0.4, 0.15),
+               (0.55, 0.45), (0.8, 0.6), (1.0, 0.25), (0.7, -0.05), (0.4, -0.2),
+               (0.15, -0.1), (0.0, -0.45), (-0.15, -0.1), (-0.4, -0.2), (-0.7, -0.05)]
+        pts = [(cx + bx * 9.5, yc + by * 9.5, zc + 0.1) for bx, by in bat]
+        for k in range(1, len(pts) - 1):
+            bld.add_tri(pts[0], pts[k], pts[k + 1], (14, 15, 20, 0.95), transp=True, rotar=True)
+        for k in range(len(pts)):
+            bld.add_linea(pts[k], pts[(k + 1) % len(pts)], (25, 25, 32), rotar=True)
+
+        return Edificio("caja", 112, esq, "GCPD (Bat-Señal)")
+
+    def _elipse_celda(self, c, r, puntos=28):
+        x0, z0, x1, z1 = self._rect_celda(c, r)
+        cx, cz = (x0 + x1) / 2, (z0 + z1) / 2
+        rx, rz = SEP_AV * 0.34, SEP_CALLE * 0.31
+        return [
+            (cx + rx * math.cos(2 * math.pi * k / puntos),
+             cz + rz * math.sin(2 * math.pi * k / puntos))
+            for k in range(puntos)
+        ]
+
+    def _recortar(self, ruta, radio_a, radio_b):
+        ruta = list(ruta)
+        def mover(p, q, radio):
+            dx, dz = q[0] - p[0], q[1] - p[1]
+            L = math.hypot(dx, dz) or 1.0
+            dx, dz = dx / L, dz / L
+            t = min(radio / max(abs(dx), abs(dz) or 1.0), 0.45 * L)
+            return (p[0] + dx * t, p[1] + dz * t)
+        inicio = mover(ruta[0], ruta[1], radio_a)
+        fin = mover(ruta[-1], ruta[-2], radio_b)
+        ruta[0], ruta[-1] = inicio, fin
+        return ruta
 
     @staticmethod
     def _huella_libre(cx, cz, w, d, ejes):
-        """Devuelve (x0,z0,x1,z1) o None. Se encoge hasta no tocar ninguna vía
-        (importante junto a la diagonal del Schwartz Bypass)."""
         for _ in range(8):
             f = (cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2)
             libre = True
@@ -524,232 +957,41 @@ class Ciudad:
         ax, az = a
         bx, bz = b
         dx, dz = bx - ax, bz - az
-        L2 = dx * dx + dz * dz
+        L2 = dx * dx + dz * dz or 1.0
         t = max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - az) * dz) / L2))
         return math.hypot(p[0] - (ax + t * dx), p[1] - (az + t * dz))
 
-    def _levantar(self, tipo, f, altura, segs):
-        if tipo == "caja":
-            s = self._caja(f, 0, altura)
-        elif tipo == "escalonado":
-            s = self._escalonado(f, altura, niveles=self.rng.choice([2, 3]))
-        elif tipo == "gotica":
-            s = self._gotica(f, altura)
-        else:
-            altura = self.rng.uniform(9, 14)
-            s = self._almacen(f, altura)
-
-        for p1, p2 in s:
-            segs.append((p1, p2, tipo))
-        return Edificio(tipo, altura, self._esquinas(f))
-
-    def _wayne(self, cx, cz, segs):
-        """Wayne Tower: torre escalonada muy alta con aguja."""
-        f = (cx - 11, cz - 9, cx + 11, cz + 9)
-        s = self._escalonado(f, 100, niveles=4, antena=18, techo_punta=12)
-        for p1, p2 in s:
-            segs.append((p1, p2, "wayne"))
-        return Edificio("wayne", 100, self._esquinas(f), "Wayne Tower")
-
-    def _arkham(self, cx, cz, segs):
-        """Arkham Asylum: bloque bajo y ancho con torres de esquina y torre central."""
-        f = (cx - 19, cz - 10, cx + 19, cz + 10)
-        x0, z0, x1, z1 = f
-        s = self._caja(f, 0, 14)
-        s += self._gable(f, 14, 6)
-        for tx, tz in ((x0, z0), (x1 - 6, z0), (x0, z1 - 6), (x1 - 6, z1 - 6)):
-            t = (tx, tz, tx + 6, tz + 6)
-            s += self._caja(t, 0, 32)
-            s += self._piramide(t, 32, 14)
-        t = (cx - 4.5, cz - 4.5, cx + 4.5, cz + 4.5)
-        s += self._caja(t, 0, 42)
-        s += self._piramide(t, 42, 20)
-        for p1, p2 in s:
-            segs.append((p1, p2, "arkham"))
-        return Edificio("arkham", 62, self._esquinas(f), "Arkham Asylum")
-
-    def _gcpd(self, cx, cz, segs):
-        """GCPD: edificio bajo con reflector en el techo que proyecta la Bat-Señal."""
-        f = (cx - 14, cz - 9, cx + 14, cz + 9)
-        s = [(p1, p2, "gcpd") for p1, p2 in self._caja(f, 0, 22)]
-        s += [(p1, p2, "gcpd") for p1, p2 in self._gable(f, 22, 4)]
-
-        # reflector sobre el techo
-        lamp = (cx - 2, cz - 2, cx + 2, cz + 2)
-        s += [(p1, p2, "senal") for p1, p2 in self._caja(lamp, 26, 30)]
-
-        # haz de luz (cono) hacia un aro en el cielo, con el murciélago dentro
-        base = (cx, 30.0, cz)
-        yc, zc, R = 112.0, cz + 18.0, 15.0
-        n = 12
-        aro = [(cx + R * math.cos(2 * math.pi * k / n), yc + R * 0.8 * math.sin(2 * math.pi * k / n), zc)
-               for k in range(n)]
-        for k in range(n):
-            s.append((aro[k], aro[(k + 1) % n], "senal"))
-            if k % 2 == 0:
-                s.append((base, aro[k], "senal"))
-
-        bat = [(-1.0, 0.25), (-0.8, 0.6), (-0.55, 0.45), (-0.4, 0.15), (-0.2, 0.2),
-               (-0.12, 0.5), (0.0, 0.35), (0.12, 0.5), (0.2, 0.2), (0.4, 0.15),
-               (0.55, 0.45), (0.8, 0.6), (1.0, 0.25), (0.7, -0.05), (0.4, -0.2),
-               (0.15, -0.1), (0.0, -0.45), (-0.15, -0.1), (-0.4, -0.2), (-0.7, -0.05)]
-        pts = [(cx + bx * 9, yc + by * 9, zc) for bx, by in bat]
-        for k in range(len(pts)):
-            s.append((pts[k], pts[(k + 1) % len(pts)], "senal"))
-
-        segs.extend(s)
-        return Edificio("caja", 112, self._esquinas(f), "GCPD (Bat-Señal)")
-
+    # Control de semáforos
     @staticmethod
-    def _esquinas(f):
-        x0, z0, x1, z1 = f
-        return [(x0, z0), (x1, z0), (x1, z1), (x0, z1)]
+    def estado_en(eje, t):
+        ciclo = 2 * (T_VERDE + T_AMARILLO)
+        t = t % ciclo
+        if eje == "NS":
+            t = (t + T_VERDE + T_AMARILLO) % ciclo
+        if t < T_VERDE:
+            return "verde"
+        if t < T_VERDE + T_AMARILLO:
+            return "amarillo"
+        return "rojo"
 
-    # ------------------------------------------------------------------
-    # Primitivas de alambre: devuelven listas de segmentos 3D
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _caja(f, ya, yb):
-        x0, z0, x1, z1 = f
-        b = [(x0, ya, z0), (x1, ya, z0), (x1, ya, z1), (x0, ya, z1)]
-        t = [(x0, yb, z0), (x1, yb, z0), (x1, yb, z1), (x0, yb, z1)]
-        s = []
-        for i in range(4):
-            j = (i + 1) % 4
-            s += [(b[i], b[j]), (t[i], t[j]), (b[i], t[i])]
-        return s
+    def actualizar(self, dt):
+        self.tiempo += dt
+        for sem in self.semaforos:
+            sem.estado = self.estado_en(sem.eje, self.tiempo)
 
-    @staticmethod
-    def _piramide(f, y, alto):
-        x0, z0, x1, z1 = f
-        base = [(x0, y, z0), (x1, y, z0), (x1, y, z1), (x0, y, z1)]
-        punta = ((x0 + x1) / 2, y + alto, (z0 + z1) / 2)
-        s = []
-        for i in range(4):
-            s.append((base[i], base[(i + 1) % 4]))
-            s.append((base[i], punta))
-        return s
+    def estado_semaforo(self, col, fila, eje):
+        return self.estado_en(eje, self.tiempo)
 
-    @staticmethod
-    def _gable(f, y, alto):
-        """Techo a dos aguas; la cumbrera corre por el lado largo."""
-        x0, z0, x1, z1 = f
-        zc, xc = (z0 + z1) / 2, (x0 + x1) / 2
-        if (x1 - x0) >= (z1 - z0):
-            a, b = (x0, y + alto, zc), (x1, y + alto, zc)
-            return [(a, b),
-                    ((x0, y, z0), a), ((x0, y, z1), a),
-                    ((x1, y, z0), b), ((x1, y, z1), b)]
-        a, b = (xc, y + alto, z0), (xc, y + alto, z1)
-        return [(a, b),
-                ((x0, y, z0), a), ((x1, y, z0), a),
-                ((x0, y, z1), b), ((x1, y, z1), b)]
-
-    def _escalonado(self, f, altura, niveles=3, antena=None, techo_punta=0):
-        """Torre art déco: cada nivel es más angosto que el de abajo."""
-        fracciones = {2: [0.65, 0.35], 3: [0.5, 0.3, 0.2],
-                      4: [0.4, 0.28, 0.2, 0.12]}[niveles]
-        x0, z0, x1, z1 = f
-        cx, cz = (x0 + x1) / 2, (z0 + z1) / 2
-        w, d = x1 - x0, z1 - z0
-
-        s, y = [], 0.0
-        for i, frac in enumerate(fracciones):
-            k = 0.72 ** i
-            nivel = (cx - w * k / 2, cz - d * k / 2, cx + w * k / 2, cz + d * k / 2)
-            s += self._caja(nivel, y, y + altura * frac)
-            y += altura * frac
-
-        if techo_punta:
-            s += self._piramide(nivel, y, techo_punta)
-            y += techo_punta
-        s.append(((cx, y, cz), (cx, y + (antena or max(6.0, altura * 0.18)), cz)))
-        return s
-
-    def _gotica(self, f, altura):
-        """Torre gótica: cuerpo, techo muy inclinado y torrecillas en las esquinas."""
-        x0, z0, x1, z1 = f
-        hb = altura * 0.7
-        techo = max(10.0, min(36.0, altura * 0.4))
-        s = self._caja(f, 0, hb)
-        s += self._piramide(f, hb, techo)
-
-        t = min(3.5, (x1 - x0) * 0.22, (z1 - z0) * 0.22)
-        for tx, tz in ((x0, z0), (x1 - t, z0), (x0, z1 - t), (x1 - t, z1 - t)):
-            s += self._piramide((tx, tz, tx + t, tz + t), hb, 9)
-        return s
-
-    def _almacen(self, f, altura):
-        """Bodega industrial con chimenea (Gotham es una ciudad de fábricas)."""
-        x0, z0, x1, z1 = f
-        chimenea = (x1 - 3.0, z0 + 1.0, x1 - 1.4, z0 + 2.6)
-        return (self._caja(f, 0, altura) + self._gable(f, altura, 5)
-                + self._caja(chimenea, altura, altura + 10))
-
-    # ------------------------------------------------------------------
-    # Utilidades de geometría (2D en retícula)
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _recortar(ruta, radio_a, radio_b):
-        """Acorta los extremos de la calle para que no entre al cuadro
-        de la intersección."""
-        ruta = list(ruta)
-
-        def mover(p, q, radio):
-            dx, dz = q[0] - p[0], q[1] - p[1]
-            L = math.hypot(dx, dz)
-            dx, dz = dx / L, dz / L
-            t = min(radio / max(abs(dx), abs(dz)), 0.45 * L)
-            return (p[0] + dx * t, p[1] + dz * t)
-
-        inicio = mover(ruta[0], ruta[1], radio_a)
-        fin = mover(ruta[-1], ruta[-2], radio_b)
-        ruta[0], ruta[-1] = inicio, fin
-        return ruta
-
-    @staticmethod
-    def _normales(Q):
-        def normal(p, q):
-            dx, dz = q[0] - p[0], q[1] - p[1]
-            L = math.hypot(dx, dz)
-            return (-dz / L, dx / L)
-
-        segs = [normal(p, q) for p, q in zip(Q[:-1], Q[1:])]
-        out = [segs[0]]
-        for a, b in zip(segs[:-1], segs[1:]):
-            nx, nz = a[0] + b[0], a[1] + b[1]
-            L = math.hypot(nx, nz) or 1.0
-            out.append((nx / L, nz / L))
-        out.append(segs[-1])
-        return out
-
-    def _elipse_celda(self, c, r, puntos=28):
-        x0, z0, x1, z1 = self._rect_celda(c, r)
-        cx, cz = (x0 + x1) / 2, (z0 + z1) / 2
-        rx, rz = SEP_AV * 0.34, SEP_CALLE * 0.31
-        return [
-            (cx + rx * math.cos(2 * math.pi * k / puntos),
-             cz + rz * math.sin(2 * math.pi * k / puntos))
-            for k in range(puntos)
-        ]
-
-    # ------------------------------------------------------------------
-    # Consultas
-    # ------------------------------------------------------------------
     def pos_nodo(self, col, fila):
         return self.nodos[self.idx[(col, fila)]]
 
     def centro_celda(self, col, fila):
-        """Centro (x, z) de una manzana, ya girado."""
         esq = [self.pos_nodo(col + i, fila + j) for i in (0, 1) for j in (0, 1)]
         return (sum(p[0] for p in esq) / 4, sum(p[2] for p in esq) / 4)
 
     def centro_zona(self, nombre):
         pts = self.zonas[nombre]
-        return (
-            sum(p[0] for p in pts) / len(pts),
-            sum(p[2] for p in pts) / len(pts),
-        )
+        return (sum(p[0] for p in pts) / len(pts), sum(p[2] for p in pts) / len(pts))
 
     def resumen(self):
         return {
@@ -762,45 +1004,99 @@ class Ciudad:
         }
 
     # ------------------------------------------------------------------
-    # Render (OpenGL)
+    # Renderizado OpenGL
     # ------------------------------------------------------------------
+    def compilar_display_list(self):
+        self._display_list = gl.glGenLists(1)
+        gl.glNewList(self._display_list, gl.GL_COMPILE)
+
+        # 1. Geometría sólida con iluminación
+        gl.glEnable(gl.GL_LIGHTING)
+        gl.glEnable(gl.GL_LIGHT0)
+        gl.glEnable(gl.GL_COLOR_MATERIAL)
+        gl.glColorMaterial(gl.GL_FRONT_AND_BACK, gl.GL_AMBIENT_AND_DIFFUSE)
+
+        gl.glLightfv(gl.GL_LIGHT0, gl.GL_POSITION, [150.0, 280.0, 100.0, 0.0])
+        gl.glLightfv(gl.GL_LIGHT0, gl.GL_DIFFUSE, [0.88, 0.90, 0.96, 1.0])
+        gl.glLightfv(gl.GL_LIGHT0, gl.GL_AMBIENT, [0.38, 0.40, 0.46, 1.0])
+
+        gl.glBegin(gl.GL_TRIANGLES)
+        for i in range(0, len(self.arr_solidos), 10):
+            x, y, z, nx, ny, nz, r, g, b, a = self.arr_solidos[i:i+10]
+            gl.glNormal3f(nx, ny, nz)
+            gl.glColor4f(r, g, b, a)
+            gl.glVertex3f(x, y, z)
+        gl.glEnd()
+
+        # 2. Líneas arquitectónicas
+        gl.glDisable(gl.GL_LIGHTING)
+        gl.glLineWidth(1.1)
+        gl.glBegin(gl.GL_LINES)
+        for i in range(0, len(self.arr_lineas), 6):
+            x, y, z, r, g, b = self.arr_lineas[i:i+6]
+            gl.glColor3f(r, g, b)
+            gl.glVertex3f(x, y, z)
+        gl.glEnd()
+
+        # 3. Transparencias (Bat-Señal)
+        if self.arr_transp is not None and len(self.arr_transp) > 0:
+            gl.glEnable(gl.GL_BLEND)
+            gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE)
+            gl.glDepthMask(gl.GL_FALSE)
+            gl.glBegin(gl.GL_TRIANGLES)
+            for i in range(0, len(self.arr_transp), 10):
+                x, y, z, nx, ny, nz, r, g, b, a = self.arr_transp[i:i+10]
+                gl.glColor4f(r, g, b, a)
+                gl.glVertex3f(x, y, z)
+            gl.glEnd()
+            gl.glDepthMask(gl.GL_TRUE)
+            gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+
+        gl.glEndList()
+
     def dibujar(self):
-        """Dibuja la ciudad. Requiere un contexto OpenGL activo y la cámara
-        (proyección y modelview) ya configurada por quien llama."""
-        # Reloj de semáforos (si la simulación no lo maneja por su cuenta)
+        """Dibuja la ciudad según el modo activo (hibrido, solido o alambre)."""
         if self.auto_reloj:
             ahora = time.monotonic()
             if self._t_ultimo is not None:
                 self.actualizar(ahora - self._t_ultimo)
             self._t_ultimo = ahora
 
-        # Geometría fija: todos los segmentos de una sola vez
-        gl.glEnableClientState(gl.GL_VERTEX_ARRAY)
-        gl.glEnableClientState(gl.GL_COLOR_ARRAY)
-        gl.glVertexPointer(3, gl.GL_FLOAT, 0, self.vertices)
-        gl.glColorPointer(3, gl.GL_FLOAT, 0, self.colores_v)
-        gl.glDrawArrays(gl.GL_LINES, 0, len(self.vertices))
-        gl.glDisableClientState(gl.GL_COLOR_ARRAY)
-        gl.glDisableClientState(gl.GL_VERTEX_ARRAY)
+        if self.modo == "alambre":
+            # Modo alambre tradicional
+            gl.glDisable(gl.GL_LIGHTING)
+            gl.glLineWidth(1.0)
+            gl.glBegin(gl.GL_LINES)
+            for i in range(0, len(self.arr_lineas), 6):
+                x, y, z, r, g, b = self.arr_lineas[i:i+6]
+                gl.glColor3f(r, g, b)
+                gl.glVertex3f(x, y, z)
+            gl.glEnd()
+        else:
+            # Modo sólido o híbrido
+            if self._display_list is None:
+                self.compilar_display_list()
+            gl.glCallList(self._display_list)
 
-        # Luces de semáforo: 3 octágonos por semáforo; la luz activa va
-        # rellena y brillante, las otras se ven apagadas (solo contorno)
-        for i, sem in enumerate(self.semaforos):
-            for k, nombre in enumerate(ORDEN_LUCES):
-                P = self.luces[i, k]
-                if sem.estado == nombre:
-                    r, g, b = COLOR_SEMAFORO[nombre]
+        # Semáforos dinámicos (cambian con el reloj)
+        gl.glDisable(gl.GL_LIGHTING)
+        for sem, luces in self.luces_semaforos_dinamicas:
+            for pos, norm, nombre_luz in luces:
+                activo = (sem.estado == nombre_luz)
+                if activo:
+                    r, g, b = COLOR_SEMAFORO[nombre_luz]
                     gl.glColor3f(r / 255.0, g / 255.0, b / 255.0)
-                    gl.glBegin(gl.GL_TRIANGLE_FAN)
-                    gl.glVertex3f(*P.mean(axis=0))
-                    for p in P:
-                        gl.glVertex3f(*p)
-                    gl.glVertex3f(*P[0])
-                    gl.glEnd()
+                    r_luz = RADIO_LUZ * 1.35
                 else:
-                    r, g, b = COLOR_APAGADO[nombre]
+                    r, g, b = COLOR_APAGADO[nombre_luz]
                     gl.glColor3f(r / 255.0, g / 255.0, b / 255.0)
-                    gl.glBegin(gl.GL_LINE_LOOP)
-                    for p in P:
-                        gl.glVertex3f(*p)
-                    gl.glEnd()
+                    r_luz = RADIO_LUZ * 0.85
+
+                gl.glBegin(gl.GL_TRIANGLE_FAN if activo else gl.GL_LINE_LOOP)
+                gl.glVertex3f(pos[0], pos[1], pos[2])
+                for j in range(9):
+                    t = 2 * math.pi * j / 8
+                    gl.glVertex3f(pos[0] + r_luz * math.cos(t) * -norm[2],
+                                  pos[1] + r_luz * math.sin(t),
+                                  pos[2] + r_luz * math.cos(t) * norm[0])
+                gl.glEnd()
