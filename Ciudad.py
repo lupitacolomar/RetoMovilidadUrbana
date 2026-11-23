@@ -1,39 +1,10 @@
-"""Gotham City - zona Upper East Side + Coventry (Modelo 3D Avanzado).
-
-Conserva al 100% la topología, planos, retícula y coordenadas originales:
-    nodos   = 20 intersecciones (x, y, z)
-    aristas = 31 tramos viales (autopista Schwartz Bypass, avenidas y calles)
-              con sus atributos (tipo, límite de velocidad, carriles) para
-              la simulación de agentes multiagente.
-    semáforos = 62 semáforos sincronizados por eje (EW / NS) con ciclo de 2 fases.
-
-Mejoras visuales implementadas (sin alterar los planos):
-    1. Superficies viales sólidas con asfalto detallado y señalización horizontal
-       (doble línea amarilla central en avenidas, líneas discontinuas blancas,
-       pasos peatonales de cebra y líneas de detención en cada aproximación).
-    2. Autopista Schwartz Bypass con camellón central sólido elevado y césped.
-    3. Banquetas perimetrales elevadas en todas las manzanas con cordones de granito,
-       pavimento y detalles de mobiliario urbano (hidrantes de bomberos).
-    4. Edificios sólidos con iluminación volumétrica y ventanas procedimentales:
-       - Wayne Tower: rascacielos Art Déco de 4 niveles, corona dorada y baliza roja.
-       - Arkham Asylum: complejo gótico con 4 torres de vigilancia cónicas, óculo y reloj.
-       - GCPD: cuartel policial con helipuerto ("H") y proyector de la Bat-Señal en las nubes.
-       - Torres góticas, edificios Art Déco y almacenes industriales con chimeneas.
-    5. Robinson Park con césped, senderos peatonales, bancas y árboles 3D volumétricos.
-    6. Reservoir con espejo de agua profundo, muro de contención y embarcadero de madera.
-    7. Semáforos 3D con postes, viseras parasol y lentes emisivas sincronizadas.
-    8. Tres modos de visualización conmutables: Híbrido, Sólido y Alambre.
-"""
-
 import math
 import random
 import time
 import numpy as np
 from OpenGL import GL as gl
 
-# ---------------------------------------------------------------------------
-# Parámetros originales de la zona (Planos y Retícula)
-# ---------------------------------------------------------------------------
+
 COLUMNAS = 5          # avenidas (norte-sur)  -> 5 x 4 = 20 intersecciones
 FILAS = 4             # calles (este-oeste)
 SEP_AV = 62           # separación entre avenidas

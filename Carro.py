@@ -1,19 +1,11 @@
-"""Carros de la simulación (solo lógica, sin OpenGL).
-
-Cada carro sigue una Ruta: una lista de intersecciones (col, fila) que se
-convierte en una trayectoria por el carril derecho de cada calle, con curvas
-suaves en las esquinas. El carro avanza a velocidad constante.
-
-Estados del carro:
-    RECTO    -> va por el carril en línea recta
-    GIRANDO  -> está dando la vuelta en una intersección
+"""lógica de carros de la simulación
 """
 
 import bisect
 import math
 
-PASOS_CURVA = 24      # puntos con los que se dibuja cada curva
-RADIO_GIRO = 7.0      # distancia antes/después de la esquina donde empieza la curva
+PASOS_CURVA = 24      
+RADIO_GIRO = 7.0     
 
 
 def _unitario(dx, dz):
@@ -51,7 +43,7 @@ class Ruta:
         lineas = [self._linea_carril(ciudad, a, b, carril) for a, b in tramos]
         n = len(lineas)
 
-        # Esquina entre el tramo i y el i+1 (None si sigue derecho)
+       
         esquinas = []
         n_union = n if ciclica else n - 1
         for i in range(n_union):
@@ -59,7 +51,7 @@ class Ruta:
 
         self.puntos = []
         self.rumbos = []
-        self.tipos = []        # tipos[j] = estado del segmento j -> j+1
+        self.tipos = []       
 
         def agregar(p, rumbo, tipo):
             if self.puntos and math.dist(p, self.puntos[-1]) < 1e-6:
@@ -69,7 +61,7 @@ class Ruta:
             self.puntos.append(p)
             self.rumbos.append(rumbo)
 
-        # Punto de inicio
+
         if ciclica and esquinas[-1] is not None:
             inicio = esquinas[-1]["pb"]
         else:
@@ -90,7 +82,7 @@ class Ruta:
                     tz = 2 * (1 - t) * (pc[1] - pa[1]) + 2 * t * (pb[1] - pc[1])
                     agregar((x, z), math.atan2(tx, tz), "GIRANDO")
 
-        # Distancia acumulada a lo largo de la trayectoria
+        
         self.acum = [0.0]
         for p, q in zip(self.puntos[:-1], self.puntos[1:]):
             self.acum.append(self.acum[-1] + math.dist(p, q))
@@ -186,13 +178,13 @@ def crear_carros(ciudad):
     (todavía no hay semáforos ni prioridades): las rectas usan la autopista y
     una calle del borde, y los circuitos usan manzanas distintas.
     """
-    # (nodos de la ruta, ¿cíclica?, carril, velocidad, color, desfase)
+    
     definiciones = [
-        # --- En línea recta (recorren toda la calle y reaparecen al inicio) ---
+        
         ([(0, 1), (1, 1), (2, 1), (3, 1), (4, 1)], False, 1, 13.0, 0, 0.0),    # autopista, hacia el este
         ([(4, 1), (3, 1), (2, 1), (1, 1), (0, 1)], False, 1, 12.0, 1, 20.0),   # autopista, hacia el oeste
         ([(4, 0), (3, 0), (2, 0), (1, 0), (0, 0)], False, 0, 10.0, 2, 0.0),    # calle, hacia el oeste
-        # --- Dando vuelta (circuitos cerrados) ---
+        
         ([(0, 2), (1, 2), (1, 3), (0, 3)], True, 0, 10.0, 3, 0.0),     # vuelta a la manzana, giros a la derecha
         ([(0, 2), (1, 2), (1, 3), (0, 3)], True, 0, 10.0, 4, 49.0),    # segundo carro en el mismo circuito
         ([(2, 2), (2, 3), (3, 3), (3, 2)], True, 0, 10.0, 5, 0.0),     # vuelta a la manzana, giros a la izquierda
