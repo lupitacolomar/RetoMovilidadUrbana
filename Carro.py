@@ -172,12 +172,6 @@ class Carro:
 
 
 def crear_carros(ciudad):
-    """Escenario de demostración: 3 carros en línea recta y 4 que dan vueltas.
-
-    Las rutas están elegidas para NO cruzarse en ninguna intersección
-    (todavía no hay semáforos ni prioridades): las rectas usan la autopista y
-    una calle del borde, y los circuitos usan manzanas distintas.
-    """
     
     definiciones = [
         
