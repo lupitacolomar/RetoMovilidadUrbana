@@ -43,7 +43,6 @@ class Ruta:
         lineas = [self._linea_carril(ciudad, a, b, carril) for a, b in tramos]
         n = len(lineas)
 
-       
         esquinas = []
         n_union = n if ciclica else n - 1
         for i in range(n_union):
@@ -60,7 +59,6 @@ class Ruta:
                 self.tipos.append(tipo)
             self.puntos.append(p)
             self.rumbos.append(rumbo)
-
 
         if ciclica and esquinas[-1] is not None:
             inicio = esquinas[-1]["pb"]
@@ -82,7 +80,6 @@ class Ruta:
                     tz = 2 * (1 - t) * (pc[1] - pa[1]) + 2 * t * (pb[1] - pc[1])
                     agregar((x, z), math.atan2(tx, tz), "GIRANDO")
 
-        
         self.acum = [0.0]
         for p, q in zip(self.puntos[:-1], self.puntos[1:]):
             self.acum.append(self.acum[-1] + math.dist(p, q))
@@ -159,26 +156,39 @@ class Carro:
         self.s = desfase              # distancia recorrida sobre la ruta
         self.estado = "RECTO"
         self.x = self.z = self.angulo = 0.0
+        self.llanta_ang = 0.0         # rotación acumulada de las llantas (rodado)
+        self.volante_ang = 0.0        # ángulo de dirección de llantas delanteras
         self._colocar()
 
     def _colocar(self):
         self.x, self.z, self.angulo, self.estado = self.ruta.punto_en(self.s)
 
     def actualizar(self, dt):
-        self.s += self.velocidad * dt
+        ang_anterior = self.angulo
+        ds = self.velocidad * dt
+        self.s += ds
         if not self.ruta.ciclica and self.s >= self.ruta.longitud:
             self.s -= self.ruta.longitud       # llegó al final: reaparece al inicio
         self._colocar()
 
+        # Rodado acumulado de las 4 llantas (radio base 0.707 * escala 0.45)
+        radio_llanta = 0.707 * 0.45
+        self.llanta_ang = (self.llanta_ang + math.degrees(ds / radio_llanta)) % 360.0
+
+        # Giro de llantas delanteras en curvas
+        if dt > 0 and self.estado == "GIRANDO":
+            d_ang = _dif_angulo(math.radians(ang_anterior), math.radians(self.angulo))
+            objetivo = max(-35.0, min(35.0, math.degrees(d_ang) * 2.5))
+            self.volante_ang += (objetivo - self.volante_ang) * min(1.0, dt * 10.0)
+        else:
+            self.volante_ang += (0.0 - self.volante_ang) * min(1.0, dt * 8.0)
+
 
 def crear_carros(ciudad):
-    
     definiciones = [
-        
         ([(0, 1), (1, 1), (2, 1), (3, 1), (4, 1)], False, 1, 13.0, 0, 0.0),    # autopista, hacia el este
         ([(4, 1), (3, 1), (2, 1), (1, 1), (0, 1)], False, 1, 12.0, 1, 20.0),   # autopista, hacia el oeste
         ([(4, 0), (3, 0), (2, 0), (1, 0), (0, 0)], False, 0, 10.0, 2, 0.0),    # calle, hacia el oeste
-        
         ([(0, 2), (1, 2), (1, 3), (0, 3)], True, 0, 10.0, 3, 0.0),     # vuelta a la manzana, giros a la derecha
         ([(0, 2), (1, 2), (1, 3), (0, 3)], True, 0, 10.0, 4, 49.0),    # segundo carro en el mismo circuito
         ([(2, 2), (2, 3), (3, 3), (3, 2)], True, 0, 10.0, 5, 0.0),     # vuelta a la manzana, giros a la izquierda
