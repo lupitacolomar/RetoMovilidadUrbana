@@ -13,7 +13,7 @@ COLORES_CARRO = [
     (0.48, 0.22, 0.62),   
 ]
 MATERIAL_PINTURA = "Material.001"
-Y_SUELO = 0.02 + 1.015 * ESCALA_CARRO
+Y_SUELO = 0.02 + 1.22 * ESCALA_CARRO   # las llantas llegan hasta y = -1.22
 
 # Posiciones locales respecto a carroceria.obj (orientada hacia +Z)
 POS_LLANTA_TRAS = (0.0, -0.5, -2.3)
@@ -47,7 +47,7 @@ class VistaCarros:
         gl.glPushMatrix()
         gl.glTranslatef(*pos)
         gl.glRotatef(90.0 + direccion, 0.0, 1.0, 0.0)
-        gl.glRotatef(-rodado, 0.0, 0.0, 1.0)
+        gl.glRotatef(rodado, 0.0, 0.0, 1.0)
         modelo_llanta.render()
         gl.glPopMatrix()
 

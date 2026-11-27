@@ -178,7 +178,8 @@ class Carro:
         # Giro de llantas delanteras en curvas
         if dt > 0 and self.estado == "GIRANDO":
             d_ang = _dif_angulo(math.radians(ang_anterior), math.radians(self.angulo))
-            objetivo = max(-35.0, min(35.0, math.degrees(d_ang) * 2.5))
+            curvatura = d_ang / ds                  # radianes por unidad recorrida
+            objetivo = max(-35.0, min(35.0, math.degrees(math.atan(2.6 * curvatura))))  # 2.6 = distancia entre ejes
             self.volante_ang += (objetivo - self.volante_ang) * min(1.0, dt * 10.0)
         else:
             self.volante_ang += (0.0 - self.volante_ang) * min(1.0, dt * 8.0)
